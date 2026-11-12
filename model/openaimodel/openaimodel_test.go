@@ -15,11 +15,13 @@
 package openaimodel
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -289,4 +291,106 @@ func redact(v string) string {
 		return "empty"
 	}
 	return fmt.Sprintf("<%d-byte value>", len(v))
+}
+
+func TestNewModelStrictFunctionTools(t *testing.T) {
+	for _, api := range []API{APIResponses, APIChatCompletions} {
+		for _, strict := range []bool{false, true} {
+			for _, stream := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/strict=%t/stream=%t", api, strict, stream), func(t *testing.T) {
+					requests := make(chan map[string]any, 1)
+					server := newLoopbackServer(t, func(w http.ResponseWriter, r *http.Request) {
+						var body map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+							t.Error("request is not JSON")
+							w.WriteHeader(http.StatusBadRequest)
+							return
+						}
+
+						requests <- body
+						w.WriteHeader(http.StatusInternalServerError)
+					})
+					llm, err := NewModel(t.Context(), "test", &ClientConfig{
+						APIKey:              "test",
+						BaseURL:             server.URL,
+						HTTPClient:          server.Client(),
+						Options:             []option.RequestOption{option.WithMaxRetries(0)},
+						API:                 api,
+						StrictFunctionTools: strict,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					schema := map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{"type": "string"},
+							"options": map[string]any{
+								"type":       []any{"object", "null"},
+								"properties": map[string]any{"limit": map[string]any{"type": "integer"}},
+							},
+						},
+						"required": []string{"query"},
+					}
+					original, err := json.Marshal(schema)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					req := &model.LLMRequest{
+						Contents: []*genai.Content{genai.NewContentFromText("test", genai.RoleUser)},
+						Config: &genai.GenerateContentConfig{Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{
+							Name: "lookup", ParametersJsonSchema: schema,
+						}}}}},
+					}
+					for range llm.GenerateContent(t.Context(), req, stream) {
+					}
+
+					var body map[string]any
+					select {
+					case body = <-requests:
+					default:
+						t.Fatal("no HTTP request")
+					}
+					tools, ok := body["tools"].([]any)
+					if !ok || len(tools) != 1 {
+						t.Fatal("expected one function tool")
+					}
+
+					function := tools[0].(map[string]any)
+					if api == APIChatCompletions {
+						function = function["function"].(map[string]any)
+					}
+					if flag, _ := function["strict"].(bool); flag != strict {
+						t.Error("strict mode did not reach the wire")
+					}
+
+					var expected map[string]any
+					if err := json.Unmarshal(original, &expected); err != nil {
+						t.Fatal(err)
+					}
+					if strict {
+						expected["additionalProperties"] = false
+						expected["required"] = []any{"options", "query"}
+						nested := expected["properties"].(map[string]any)["options"].(map[string]any)
+						nested["additionalProperties"] = false
+						nested["required"] = []any{"limit"}
+					}
+					if !reflect.DeepEqual(function["parameters"], expected) {
+						t.Error("function schema does not match the configured mode")
+					}
+
+					after, err := json.Marshal(schema)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if string(after) != string(original) {
+						t.Error("caller-owned schema was mutated")
+					}
+				})
+			}
+		}
+	}
 }

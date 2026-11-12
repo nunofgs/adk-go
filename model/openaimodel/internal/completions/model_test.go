@@ -628,5 +628,5 @@ func newTestModel(t *testing.T, server *httptest.Server) model.LLM {
 		option.WithBaseURL(server.URL+"/v1"),
 		option.WithHTTPClient(server.Client()),
 	)
-	return New(&client, "gpt-4o-mini")
+	return New(&client, "gpt-4o-mini", false)
 }

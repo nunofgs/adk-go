@@ -36,8 +36,9 @@ import (
 // third-party providers implement. It is what openaimodel.NewModel returns for
 // a ClientConfig whose API is openaimodel.APIChatCompletions.
 type Model struct {
-	client *openai.Client
-	name   string
+	client              *openai.Client
+	name                string
+	strictFunctionTools bool
 }
 
 // Name returns the model name a request is sent with when it does not name
@@ -54,6 +55,15 @@ func (m *Model) GenerateContent(ctx context.Context, req *model.LLMRequest, stre
 	if err != nil {
 		return shared.SingleErrorSequence(err)
 	}
+
+	if m.strictFunctionTools {
+		for _, tool := range params.Tools {
+			function := &tool.OfFunction.Function
+			function.Strict = param.NewOpt(true)
+			shared.EnforceStrictOpenAISchema(map[string]any(function.Parameters))
+		}
+	}
+
 	timeout := shared.RequestTimeout(req.Config)
 	if stream {
 		return m.generateStream(ctx, params, timeout)
@@ -231,6 +241,6 @@ func attachMetadata(resp *model.LLMResponse, completion *openai.ChatCompletion) 
 }
 
 // New returns a Model talking to the Chat Completions API as modelName.
-func New(client *openai.Client, modelName string) *Model {
-	return &Model{client: client, name: modelName}
+func New(client *openai.Client, modelName string, strictFunctionTools bool) *Model {
+	return &Model{client: client, name: modelName, strictFunctionTools: strictFunctionTools}
 }

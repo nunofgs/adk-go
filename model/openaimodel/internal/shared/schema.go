@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -117,8 +118,13 @@ func EnforceStrictOpenAISchema(val any) {
 		return
 	}
 
-	t, hasType := schema["type"]
-	isObj := hasType && t == "object"
+	var isObj bool
+	switch types := schema["type"].(type) {
+	case string:
+		isObj = types == "object"
+	case []any:
+		isObj = slices.Contains(types, "object")
+	}
 	propsMap, _ := schema["properties"].(map[string]any)
 
 	if isObj {

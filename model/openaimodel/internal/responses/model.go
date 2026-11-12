@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	oairesponses "github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
 
@@ -34,8 +35,9 @@ import (
 // Model talks to the Responses API. It is what openaimodel.NewModel returns
 // for a ClientConfig whose API is openaimodel.APIResponses or unset.
 type Model struct {
-	client *openai.Client
-	name   string
+	client              *openai.Client
+	name                string
+	strictFunctionTools bool
 }
 
 // Name returns the model name a request is sent with when it does not name
@@ -52,6 +54,14 @@ func (m *Model) GenerateContent(ctx context.Context, req *model.LLMRequest, stre
 	if err != nil {
 		return shared.SingleErrorSequence(err)
 	}
+
+	if m.strictFunctionTools {
+		for _, tool := range params.Tools {
+			tool.OfFunction.Strict = param.NewOpt(true)
+			shared.EnforceStrictOpenAISchema(tool.OfFunction.Parameters)
+		}
+	}
+
 	timeout := shared.RequestTimeout(req.Config)
 	if stream {
 		return m.generateStream(ctx, params, timeout)
@@ -547,6 +557,6 @@ func attachMetadata(resp *model.LLMResponse, openaiResp *oairesponses.Response) 
 }
 
 // New returns a Model talking to the Responses API as modelName.
-func New(client *openai.Client, modelName string) *Model {
-	return &Model{client: client, name: modelName}
+func New(client *openai.Client, modelName string, strictFunctionTools bool) *Model {
+	return &Model{client: client, name: modelName, strictFunctionTools: strictFunctionTools}
 }

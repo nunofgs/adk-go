@@ -56,7 +56,8 @@ type ClientConfig struct {
 	// API selects which OpenAI HTTP API to talk to. The zero value is
 	// [APIResponses], so a configuration written before this field existed
 	// keeps the endpoint it already used.
-	API API
+	API                 API
+	StrictFunctionTools bool // Opt-in because strict tools require every property and disallow arbitrary map keys.
 }
 
 // FinishMessageKey is the [model.LLMResponse.CustomMetadata] key under which a
@@ -96,9 +97,9 @@ func NewModel(_ context.Context, modelName string, cfg *ClientConfig) (model.LLM
 	client := openai.NewClient(opts...)
 	switch cfg.API {
 	case "", APIResponses:
-		return responses.New(&client, modelName), nil
+		return responses.New(&client, modelName, cfg.StrictFunctionTools), nil
 	case APIChatCompletions:
-		return completions.New(&client, modelName), nil
+		return completions.New(&client, modelName, cfg.StrictFunctionTools), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedAPI, cfg.API)
 	}

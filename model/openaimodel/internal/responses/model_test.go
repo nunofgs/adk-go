@@ -2417,5 +2417,5 @@ func newTestModel(modelName string, cfg *testClientConfig) model.LLM {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	client := openai.NewClient(opts...)
-	return New(&client, modelName)
+	return New(&client, modelName, false)
 }
